@@ -7,7 +7,8 @@ use clap::{Arg, ArgMatches, Command};
 use futures::future;
 use std::path::Path;
 use std::process::Command as SysCommand;
-use tokio_core::reactor::Core;
+// use tokio_core::reactor::Core;
+use tokio::runtime::Runtime;
 
 use crate::config;
 use crate::config::{Locked, LockedSource};
@@ -73,7 +74,7 @@ pub fn run(sess: &Session, path: &Path, matches: &ArgMatches) -> Result<()> {
         println!("{} already has a directory in {}.", dep, path_mod);
         println!("Please manually ensure the correct checkout.");
     } else {
-        let mut core = Core::new().unwrap();
+        let mut core = Runtime::new().unwrap();
         let io = SessionIo::new(&sess, core.handle());
 
         let ids = matches
@@ -82,7 +83,7 @@ pub fn run(sess: &Session, path: &Path, matches: &ArgMatches) -> Result<()> {
             .map(|n| Ok((n, sess.dependency_with_name(n)?)))
             .collect::<Result<Vec<_>>>()?;
         debugln!("main: obtain checkouts {:?}", ids);
-        let checkouts = core.run(future::join_all(
+        let checkouts = core.block_on(future::join_all(
             ids.iter()
                 .map(|&(_, id)| io.checkout(id))
                 .collect::<Vec<_>>(),

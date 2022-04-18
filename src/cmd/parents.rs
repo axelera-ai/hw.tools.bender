@@ -7,7 +7,8 @@ use clap::{Arg, ArgMatches, Command};
 use std::collections::HashMap;
 use std::io::Write;
 use tabwriter::TabWriter;
-use tokio_core::reactor::Core;
+// use tokio_core::reactor::Core;
+use tokio::runtime::Runtime;
 
 use crate::error::*;
 use crate::sess::{DependencyConstraint, DependencySource};
@@ -28,7 +29,7 @@ pub fn new<'a>() -> Command<'a> {
 pub fn run(sess: &Session, matches: &ArgMatches) -> Result<()> {
     let dep = &matches.value_of("name").unwrap().to_lowercase();
     sess.dependency_with_name(dep)?;
-    let mut core = Core::new().unwrap();
+    let mut core = Runtime::new().unwrap();
     let io = SessionIo::new(&sess, core.handle());
 
     let parent_array = {

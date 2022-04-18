@@ -5,7 +5,8 @@
 
 use clap::{Arg, ArgMatches, Command};
 use futures::future;
-use tokio_core::reactor::Core;
+// use tokio_core::reactor::Core;
+use tokio::runtime::Runtime;
 
 use crate::error::*;
 use crate::sess::{Session, SessionIo};
@@ -24,7 +25,7 @@ pub fn new<'a>() -> Command<'a> {
 
 /// Execute the `path` subcommand.
 pub fn run(sess: &Session, matches: &ArgMatches) -> Result<()> {
-    let mut core = Core::new().unwrap();
+    let mut core = Runtime::new().unwrap();
     let io = SessionIo::new(&sess, core.handle());
 
     let ids = matches

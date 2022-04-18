@@ -10,10 +10,12 @@ extern crate serde_json;
 extern crate serde_yaml;
 
 extern crate futures;
-extern crate futures_cpupool;
-extern crate tokio_core;
-extern crate tokio_process;
+// extern crate futures_cpupool;
+// extern crate tokio_core;
+// extern crate tokio_process;
+extern crate tokio;
 
+extern crate async_process;
 extern crate blake2;
 extern crate clap;
 extern crate dirs;
@@ -26,7 +28,7 @@ pub mod error;
 pub mod cli;
 pub mod cmd;
 pub mod config;
-pub mod future_throttle;
+// pub mod future_throttle;
 pub mod git;
 pub mod resolver;
 pub mod sess;

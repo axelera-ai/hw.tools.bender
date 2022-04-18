@@ -16,7 +16,8 @@ use crate::config::{Config, Locked, Manifest, Merge, PartialConfig, PrefixPaths,
 use crate::error::*;
 use crate::resolver::DependencyResolver;
 use crate::sess::{Session, SessionArenas, SessionIo};
-use tokio_core::reactor::Core;
+// use tokio_core::reactor::Core;
+use tokio::runtime::Runtime;
 
 /// Inner main function which can return an error.
 pub fn main() -> Result<()> {
@@ -46,15 +47,15 @@ pub fn main() -> Result<()> {
                     .long("fetch")
                     .help("forces fetch of git dependencies"),
             ),
-        )
-        .subcommand(cmd::path::new())
-        .subcommand(cmd::parents::new())
-        .subcommand(cmd::clone::new())
-        .subcommand(cmd::packages::new())
-        .subcommand(cmd::sources::new())
-        .subcommand(cmd::config::new())
-        .subcommand(cmd::script::new())
-        .subcommand(cmd::checkout::new());
+        );
+    // .subcommand(cmd::path::new())
+    // .subcommand(cmd::parents::new())
+    // .subcommand(cmd::clone::new())
+    // .subcommand(cmd::packages::new())
+    // .subcommand(cmd::sources::new())
+    // .subcommand(cmd::config::new())
+    // .subcommand(cmd::script::new())
+    // .subcommand(cmd::checkout::new());
 
     // Add the `--debug` option in debug builds.
     let app = if cfg!(debug_assertions) {
@@ -154,13 +155,13 @@ pub fn main() -> Result<()> {
 
     // Ensure the locally linked packages are up-to-date.
     {
-        let mut core = Core::new().unwrap();
-        let io = SessionIo::new(&sess, core.handle());
+        let mut runtime = Runtime::new().unwrap();
+        let io = SessionIo::new(&sess, runtime.handle());
         for (path, pkg_name) in &sess.manifest.workspace.package_links {
             debugln!("main: maintaining link to {} at {:?}", pkg_name, path);
 
             // Determine the checkout path for this package.
-            let pkg_path = core.run(io.checkout(sess.dependency_with_name(pkg_name)?))?;
+            let pkg_path = runtime.block_on(io.checkout(sess.dependency_with_name(pkg_name)?))?;
             let pkg_path = path
                 .parent()
                 .and_then(|path| pathdiff::diff_paths(pkg_path, path))
@@ -228,16 +229,16 @@ pub fn main() -> Result<()> {
 
     // Dispatch the different subcommands.
     match matches.subcommand() {
-        Some(("path", matches)) => cmd::path::run(&sess, matches),
-        Some(("parents", matches)) => cmd::parents::run(&sess, matches),
-        Some(("clone", matches)) => cmd::clone::run(&sess, &root_dir, matches),
-        Some(("packages", matches)) => cmd::packages::run(&sess, matches),
-        Some(("sources", matches)) => cmd::sources::run(&sess, matches),
-        Some(("config", matches)) => cmd::config::run(&sess, matches),
-        Some(("script", matches)) => cmd::script::run(&sess, matches),
-        Some(("checkout", matches)) => cmd::checkout::run(&sess, matches),
-        Some(("update", _)) => Ok(()),
-        Some((plugin, matches)) => execute_plugin(&sess, plugin, matches.values_of_os("")),
+        // Some(("path", matches)) => cmd::path::run(&sess, matches),
+        // Some(("parents", matches)) => cmd::parents::run(&sess, matches),
+        // Some(("clone", matches)) => cmd::clone::run(&sess, &root_dir, matches),
+        // Some(("packages", matches)) => cmd::packages::run(&sess, matches),
+        // Some(("sources", matches)) => cmd::sources::run(&sess, matches),
+        // Some(("config", matches)) => cmd::config::run(&sess, matches),
+        // Some(("script", matches)) => cmd::script::run(&sess, matches),
+        // Some(("checkout", matches)) => cmd::checkout::run(&sess, matches),
+        // Some(("update", _)) => Ok(()),
+        // Some((plugin, matches)) => execute_plugin(&sess, plugin, matches.values_of_os("")),
         _ => Ok(()),
     }
 }
@@ -409,51 +410,51 @@ fn write_lockfile(locked: &Locked, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Execute a plugin.
-fn execute_plugin(sess: &Session, plugin: &str, matches: Option<OsValues>) -> Result<()> {
-    debugln!("main: execute plugin `{}`", plugin);
+// /// Execute a plugin.
+// fn execute_plugin(sess: &Session, plugin: &str, matches: Option<OsValues>) -> Result<()> {
+//     debugln!("main: execute plugin `{}`", plugin);
 
-    // Obtain a list of declared plugins.
-    let mut core = Core::new().unwrap();
-    let io = SessionIo::new(sess, core.handle());
-    let plugins = core.run(io.plugins())?;
+//     // Obtain a list of declared plugins.
+//     let mut runtime = Runtime::new().unwrap();
+//     let io = SessionIo::new(sess, runtime.handle());
+//     let plugins = runtime.block_on(io.plugins())?;
 
-    // Lookup the requested plugin and complain if it does not exist.
-    let plugin = match plugins.get(plugin) {
-        Some(p) => p,
-        None => return Err(Error::new(format!("Unknown command `{}`.", plugin))),
-    };
-    debugln!("main: found plugin {:#?}", plugin);
+//     // Lookup the requested plugin and complain if it does not exist.
+//     let plugin = match plugins.get(plugin) {
+//         Some(p) => p,
+//         None => return Err(Error::new(format!("Unknown command `{}`.", plugin))),
+//     };
+//     debugln!("main: found plugin {:#?}", plugin);
 
-    // Assemble a command that executes the plugin with the appropriate
-    // environment and forwards command line arguments.
-    let mut cmd = SysCommand::new(&plugin.path);
-    cmd.env(
-        "BENDER",
-        std::env::current_exe()
-            .map_err(|cause| Error::chain("Failed to determine current executable.", cause))?,
-    );
-    cmd.env(
-        "BENDER_CALL_DIR",
-        std::env::current_dir()
-            .map_err(|cause| Error::chain("Failed to determine current directory.", cause))?,
-    );
-    cmd.env("BENDER_MANIFEST_DIR", sess.root);
-    cmd.current_dir(&sess.root);
-    if let Some(args) = matches {
-        cmd.args(args);
-    }
-    debugln!("main: executing plugin {:#?}", cmd);
-    let stat = cmd.status().map_err(|cause| {
-        Error::chain(
-            format!(
-                "Unable to spawn process for plugin `{}`. Command was {:#?}.",
-                plugin.name, cmd
-            ),
-            cause,
-        )
-    })?;
+//     // Assemble a command that executes the plugin with the appropriate
+//     // environment and forwards command line arguments.
+//     let mut cmd = SysCommand::new(&plugin.path);
+//     cmd.env(
+//         "BENDER",
+//         std::env::current_exe()
+//             .map_err(|cause| Error::chain("Failed to determine current executable.", cause))?,
+//     );
+//     cmd.env(
+//         "BENDER_CALL_DIR",
+//         std::env::current_dir()
+//             .map_err(|cause| Error::chain("Failed to determine current directory.", cause))?,
+//     );
+//     cmd.env("BENDER_MANIFEST_DIR", sess.root);
+//     cmd.current_dir(&sess.root);
+//     if let Some(args) = matches {
+//         cmd.args(args);
+//     }
+//     debugln!("main: executing plugin {:#?}", cmd);
+//     let stat = cmd.status().map_err(|cause| {
+//         Error::chain(
+//             format!(
+//                 "Unable to spawn process for plugin `{}`. Command was {:#?}.",
+//                 plugin.name, cmd
+//             ),
+//             cause,
+//         )
+//     })?;
 
-    // Don't bother to do anything after the plugin was run.
-    std::process::exit(stat.code().unwrap_or(1));
-}
+//     // Don't bother to do anything after the plugin was run.
+//     std::process::exit(stat.code().unwrap_or(1));
+// }

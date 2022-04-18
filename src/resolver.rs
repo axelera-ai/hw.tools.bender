@@ -5,15 +5,18 @@
 
 #![deny(missing_docs)]
 
+use crate::futures::FutureExt;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 use std::fs;
 use std::mem;
 
 use futures::future::join_all;
-use futures::Future;
 use indexmap::{IndexMap, IndexSet};
-use tokio_core::reactor::Core;
+// use futures::Future;
+// use tokio_core::reactor::Core;
+use tokio::runtime::Runtime;
 
 extern crate itertools;
 use self::itertools::Itertools;
@@ -64,7 +67,7 @@ impl<'ctx> DependencyResolver<'ctx> {
 
     /// Resolve dependencies.
     pub fn resolve(mut self) -> Result<config::Locked> {
-        let mut core = Core::new().unwrap();
+        let mut core = Runtime::new().unwrap();
         let io = SessionIo::new(self.sess, core.handle());
 
         // Store path dependencies already in checkout_dir
@@ -209,7 +212,7 @@ impl<'ctx> DependencyResolver<'ctx> {
         &mut self,
         deps: &'ctx HashMap<String, config::Dependency>,
         manifest: &'ctx config::Manifest,
-        core: &mut Core,
+        core: &mut Runtime,
         io: &SessionIo<'ctx, 'ctx>,
     ) -> Result<()> {
         // Map the dependencies to unique IDs.
@@ -232,7 +235,7 @@ impl<'ctx> DependencyResolver<'ctx> {
             .map(|&id| io.dependency_versions(id, false).map(move |v| (id, v)))
             .collect();
         let versions: HashMap<_, _> = core
-            .run(join_all(versions))?
+            .block_on(join_all(versions))
             .into_iter()
             .collect::<HashMap<_, _>>();
         // debugln!("resolve: versions {:#?}", versions);
@@ -253,7 +256,7 @@ impl<'ctx> DependencyResolver<'ctx> {
                     name, manifest.package.name
                 )));
             }
-            self.register_dependency(name, id, versions[&id].clone());
+            self.register_dependency(name, id, versions[&id]?.clone());
         }
         Ok(())
     }
@@ -286,7 +289,7 @@ impl<'ctx> DependencyResolver<'ctx> {
     }
 
     /// Apply constraints to each dependency's versions.
-    fn mark(&mut self, core: &mut Core, io: &SessionIo<'ctx, 'ctx>) -> Result<()> {
+    fn mark(&mut self, core: &mut Runtime, io: &SessionIo<'ctx, 'ctx>) -> Result<()> {
         use std::iter::once;
 
         // Gather the constraints from the available manifests. Group them by
@@ -456,7 +459,7 @@ impl<'ctx> DependencyResolver<'ctx> {
         con: &DependencyConstraint,
         src: &mut DependencySource<'ctx>,
         all_cons: &[(&str, DependencyConstraint)],
-        core: &mut Core,
+        core: &mut Runtime,
         io: &SessionIo<'ctx, 'ctx>,
     ) -> Result<()> {
         let indices = match self.req_indices(name, con, src) {
@@ -469,7 +472,7 @@ impl<'ctx> DependencyResolver<'ctx> {
         // debugln!("resolve: restricting `{}` to versions {:?}", name, indices);
 
         if indices.is_empty() {
-            src.versions = core.run(io.dependency_versions(src.id, true))?;
+            src.versions = core.block_on(io.dependency_versions(src.id, true))?;
 
             let indices = match self.req_indices(name, con, src) {
                 Ok(o) => match o {
@@ -649,7 +652,7 @@ impl<'ctx> DependencyResolver<'ctx> {
     }
 
     /// Close the set of dependencies.
-    fn close(&mut self, core: &mut Core, io: &SessionIo<'ctx, 'ctx>) -> Result<()> {
+    fn close(&mut self, core: &mut Runtime, io: &SessionIo<'ctx, 'ctx>) -> Result<()> {
         debugln!("resolve: computing closure over dependencies");
         let manifests = {
             let mut sub_deps = Vec::new();
@@ -662,15 +665,15 @@ impl<'ctx> DependencyResolver<'ctx> {
                 let manifest = io.dependency_manifest_version(src.id, version);
                 sub_deps.push(manifest.map(move |m| (dep.name, m)));
             }
-            core.run(join_all(sub_deps))?
+            core.block_on(join_all(sub_deps))
         };
         for (name, manifest) in manifests {
-            if let Some(m) = manifest {
+            if let Some(m) = manifest? {
                 debugln!("resolve: for `{}` loaded manifest {:#?}", name, m);
                 self.register_dependencies_in_manifest(&m.dependencies, m, core, io)?;
             }
             let ref mut existing = self.table.get_mut(name).unwrap().manifest;
-            *existing = manifest;
+            *existing = manifest?;
         }
         Ok(())
     }

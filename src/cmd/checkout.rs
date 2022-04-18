@@ -4,7 +4,7 @@
 //! The `checkout` subcommand.
 
 use clap::{ArgMatches, Command};
-use tokio_core::reactor::Core;
+use tokio::runtime::Runtime;
 
 use crate::error::*;
 use crate::sess::{Session, SessionIo};
@@ -16,7 +16,7 @@ pub fn new<'a>() -> Command<'a> {
 
 /// Execute the `checkout` subcommand.
 pub fn run(sess: &Session, _matches: &ArgMatches) -> Result<()> {
-    let mut core = Core::new().unwrap();
+    let mut core = Runtime::new().unwrap();
     let io = SessionIo::new(&sess, core.handle());
     let _srcs = core.run(io.sources())?;
 
