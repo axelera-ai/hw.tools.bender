@@ -21,6 +21,10 @@ extern crate pathdiff;
 extern crate semver;
 extern crate typed_arena;
 
+#[cfg(feature = "pickle")]
+#[macro_use]
+extern crate log;
+
 #[macro_use]
 pub mod error;
 pub mod cli;
