@@ -41,6 +41,7 @@ pub fn new<'a>() -> Command<'a> {
                     "vivado",
                     "vivado-sim",
                     "precision",
+                    "formality",
                 ]),
         )
         .arg(
@@ -145,6 +146,24 @@ pub fn new<'a>() -> Command<'a> {
                 .takes_value(true)
                 .multiple_occurrences(true),
         )
+        .arg(
+            Arg::new("formality-mode")
+            .long("formality-mode")
+            .takes_value(true)
+            .default_value("r")
+            .possible_values(&[
+                "r",
+                "i",
+                "reference",
+                "implemented",
+            ])
+        )
+        .arg(
+            Arg::new("formality-libname")
+            .long("formality-libname")
+            .takes_value(true)
+            .default_value("WORK")
+        )
 }
 
 fn get_package_strings<I>(packages: I) -> HashSet<String>
@@ -181,6 +200,7 @@ pub fn run(sess: &Session, matches: &ArgMatches) -> Result<()> {
         "vivado" => concat(vivado_targets, &["synthesis"]),
         "vivado-sim" => concat(vivado_targets, &["simulation"]),
         "precision" => vec!["precision", "fpga", "synthesis"],
+        "formality" => vec!["formality"],
         _ => unreachable!(),
     };
 
@@ -264,6 +284,14 @@ pub fn run(sess: &Session, matches: &ArgMatches) -> Result<()> {
         ));
     }
 
+    if matches.is_present("formality-mode")
+        && format != "formality"
+    {
+        return Err(Error::new(
+            "'formatlity-mode' only works with 'formality' format",
+        ));
+    }
+
     // Generate the corresponding output.
     match format {
         "flist" => emit_flist(sess, matches, srcs),
@@ -283,6 +311,7 @@ pub fn run(sess: &Session, matches: &ArgMatches) -> Result<()> {
         "vivado" => emit_vivado_tcl(sess, matches, targets, srcs),
         "vivado-sim" => emit_vivado_tcl(sess, matches, targets, srcs),
         "precision" => emit_precision_tcl(sess, matches, targets, srcs, abort_on_error),
+        "formality" => emit_formality_tcl(sess, matches, targets, srcs),
         _ => unreachable!(),
     }
 }
@@ -1255,5 +1284,125 @@ fn emit_precision_tcl(
             },
         );
     }
+    Ok(())
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum FullSourceType {
+    Verilog,
+    SystemVerilog,
+    Vhdl,
+}
+
+
+/// Emit a Synopsys Design Compiler compilation script.
+fn emit_formality_tcl(
+    sess: &Session,
+    matches: &ArgMatches,
+    targets: TargetSet,
+    srcs: Vec<SourceGroup>,
+) -> Result<()> {
+    println!("{}", header_tcl(sess));
+    println!("set search_path_initial $search_path");
+    let relativize_path = |p: &std::path::Path| quote(&relativize_path(p, sess.root));
+    for src in srcs {
+        // Adjust the search path.
+        println!("");
+        println!("set search_path $search_path_initial");
+        for i in src.clone().get_incdirs() {
+            println!("lappend search_path {}", relativize_path(i));
+        }
+
+        // Emit analyze commands.
+        separate_files_in_group(
+            src,
+            |f| match f {
+                SourceFile::File(p) => match p.extension().and_then(std::ffi::OsStr::to_str) {
+                    Some("v") | Some("vp") => Some(FullSourceType::Verilog),
+                    Some("sv") => Some(FullSourceType::SystemVerilog),
+                    Some("vhd") | Some("vhdl") => Some(FullSourceType::Vhdl),
+                    _ => None,
+                },
+                _ => None,
+            },
+            |src, ty, files| {
+                let mut lines = vec![];
+                lines.push(
+                    tcl_catch_prefix(
+                        &format!(
+                            "read_{} -{} -libname {}",
+                            match ty {
+                                FullSourceType::Verilog => {
+                                    "verilog"
+                                }
+                                FullSourceType::SystemVerilog => {
+                                    "sverilog"
+                                }
+                                FullSourceType::Vhdl => {
+                                    "vhdl"
+                                }
+                            },
+                            match matches.value_of("formality-mode") {
+                                Some("r") => "r",
+                                Some("i") => "i",
+                                Some("reference") => "r",
+                                Some("implemented") => "i",
+                                Some(_) => "r",
+                                None => "r",
+                            },
+                            match matches.value_of("formality-libname") {
+                                Some(x) => x,
+                                None => "WORK"
+                            }
+                        ),
+                        true,
+                    )
+                    .to_owned(),
+                );
+
+                // Add defines.
+                let mut defines: Vec<(String, Option<String>)> = vec![];
+                defines.extend(
+                    src.defines
+                        .iter()
+                        .map(|(k, &v)| (k.to_string(), v.map(String::from))),
+                );
+                defines.extend(
+                    targets
+                        .iter()
+                        .map(|t| (format!("TARGET_{}", t.to_uppercase()), None)),
+                );
+                add_defines_from_matches(&mut defines, matches);
+                defines.sort();
+                if !defines.is_empty() {
+                    lines.push("-define {".to_owned());
+                    for (k, v) in defines {
+                        let mut s = format!("    {}", k);
+                        if let Some(v) = v {
+                            s.push('=');
+                            s.push_str(&v);
+                        }
+                        lines.push(s);
+                    }
+                    lines.push("}".to_owned());
+                }
+
+                // Add files.
+                lines.push("[list".to_owned());
+                for file in files {
+                    let p = match file {
+                        SourceFile::File(p) => p,
+                        _ => continue,
+                    };
+                    lines.push(format!("    {}", relativize_path(p)));
+                }
+                lines.push("]".to_owned());
+                println!("");
+                println!("{}", lines.join(" \\\n    "));
+            },
+        );
+    }
+    println!("");
+    println!("set search_path $search_path_initial");
     Ok(())
 }
